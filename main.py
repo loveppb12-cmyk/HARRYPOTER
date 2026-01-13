@@ -12,8 +12,12 @@ USERNAME, = range(1)
 
 
 def load_reports():
-    with open("report.txt", "r", encoding="utf-8") as file:
-        return [line.strip() for line in file if line.strip()]
+    try:
+        with open("report.txt", "r", encoding="utf-8") as file:
+            return [line.strip() for line in file if line.strip()]
+    except FileNotFoundError:
+        print("⚠️ report.txt not found. Creating empty list.")
+        return []
 
 
 def is_valid_username(username):
@@ -40,17 +44,19 @@ def generate_data(username, message):
 
 def load_proxies():
     try:
-        with open("NG.txt", "r") as f:
+        with open("socks4_proxies.txt", "r") as f:  # Changed from NG.txt to socks4_proxies.txt
             return [line.strip() for line in f if line.strip()]
-    except:
+    except FileNotFoundError:
+        print("⚠️ Proxy file not found. Using direct connection.")
         return []
+
 
 def send_data(data, proxy=None):
     headers = {
         "Host": "telegram.org",
         "origin": "https://telegram.org", 
         "content-type": "application/x-www-form-urlencoded",
-        "user-agent": "Mozilla/5.0",
+        "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
         "referer": "https://telegram.org/support"
     }
     try:
@@ -63,7 +69,8 @@ def send_data(data, proxy=None):
         res = requests.post("https://telegram.org/support", data=data, headers=headers, proxies=proxies, timeout=10)
         success = "Thank you" in res.text or res.status_code == 200
         return success, proxy if proxy else "direct"
-    except:
+    except Exception as e:
+        print(f"Error sending data: {e}")
         return False, proxy if proxy else "direct"
 
 
@@ -89,6 +96,10 @@ def handle_username(update: Update, context: CallbackContext):
 
     # Begin reporting
     reports = load_reports()
+    if not reports:
+        update.message.reply_text("❌ No reports found in report.txt")
+        return ConversationHandler.END
+    
     total = len(reports)
     success_count = 0
     progress_message = update.message.reply_text("📤 Starting reports...")
@@ -100,7 +111,7 @@ def handle_username(update: Update, context: CallbackContext):
     
     for i, msg in enumerate(reports):
         form_data, name, email, number, final_msg = generate_data(username, msg)
-        proxy = proxies[proxy_index] if proxies else None
+        proxy = proxies[proxy_index] if proxies and len(proxies) > 0 else None
         success, used_proxy = send_data(form_data, proxy)
         
         if success:
@@ -108,28 +119,49 @@ def handle_username(update: Update, context: CallbackContext):
             success_by_proxy[used_proxy] = success_by_proxy.get(used_proxy, 0) + 1
             report_log.append(f"Report {i+1}:\nName: {name}\nEmail: {email}\nPhone: {number}\nProxy: {used_proxy}\nMessage: {final_msg}\n---\n")
         
-        if proxies:
+        if proxies and len(proxies) > 0:
             proxy_index = (proxy_index + 1) % len(proxies)
         time.sleep(2) 
 
         percent = int(((i + 1) / total) * 100)
         progress_bar = "█" * (percent // 10) + "▒" * (10 - (percent // 10))
         proxy_stats = "\n".join(f"🌐 {p}: {c} successful" for p, c in success_by_proxy.items())
-        progress_message.edit_text(f"📊 Progress: [{progress_bar}] {percent}%\n📤 Sent: {i+1}/{total}\n\n{proxy_stats}")
+        try:
+            progress_message.edit_text(f"📊 Progress: [{progress_bar}] {percent}%\n📤 Sent: {i+1}/{total}\n✅ Successful: {success_count}\n\n{proxy_stats}")
+        except:
+            pass
         
         if len(report_log) > 0 and len(report_log) % 50 == 0:
-     
-            with open(f"reports_{username}.txt", "w", encoding="utf-8") as f:
-                f.writelines(report_log)
-            update.message.reply_document(
-                document=open(f"reports_{username}.txt", "rb"),
-                caption=f"📋 Report details for {success_count} reports"
-            )
+            try:
+                with open(f"reports_{username}.txt", "w", encoding="utf-8") as f:
+                    f.writelines(report_log)
+                update.message.reply_document(
+                    document=open(f"reports_{username}.txt", "rb"),
+                    caption=f"📋 Report details for {success_count} reports"
+                )
+            except Exception as e:
+                print(f"Error saving report file: {e}")
         
         if success_count > 0 and success_count % 50 == 0:
             update.message.reply_text(f"✅ Successfully sent {success_count} reports!")
 
-    progress_message.edit_text(f"✅ Complete!\n📊 Progress: [██████████] 100%\n📨 Total successful reports: {success_count}/{total}")
+    try:
+        progress_message.edit_text(f"✅ Complete!\n📊 Progress: [██████████] 100%\n📨 Total successful reports: {success_count}/{total}")
+    except:
+        pass
+    
+    # Save final report
+    if report_log:
+        try:
+            with open(f"reports_{username}.txt", "w", encoding="utf-8") as f:
+                f.writelines(report_log)
+            update.message.reply_document(
+                document=open(f"reports_{username}.txt", "rb"),
+                caption=f"📋 Final report for {username}\n✅ Successful: {success_count}/{total}"
+            )
+        except Exception as e:
+            print(f"Error saving final report: {e}")
+    
     return ConversationHandler.END
 
 
